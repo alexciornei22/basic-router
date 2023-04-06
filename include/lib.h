@@ -7,6 +7,13 @@
 #include <stdlib.h>
 
 #define MAX_PACKET_LEN 1600
+#define MAC_LEN 6
+#define IP_LEN 4
+
+#define ARP_OPCODE_REQ 1
+#define ARP_OPCODE_REP 2
+#define ARP_HTYPE_ETH 1
+
 #define ROUTER_NUM_INTERFACES 3
 
 int send_to_link(int interface, char *frame_data, size_t length);
@@ -34,6 +41,13 @@ struct route_table_entry {
 struct arp_entry {
     uint32_t ip;
     uint8_t mac[6];
+};
+
+struct packet {
+    char *buf;
+    struct route_table_entry* best_route;
+    size_t len;
+    int interface;
 };
 
 char *get_interface_ip(int interface);
@@ -86,7 +100,17 @@ int read_rtable(const char *path, struct route_table_entry *rtable);
  * */
 int parse_arp_table(char *path, struct arp_entry *arp_table);
 
+int send_arp_request(struct route_table_entry* route);
+
+int send_icmp_error(char *buf, size_t len, int error);
+
+struct route_table_entry *get_best_route(uint32_t ip_dest);
+
+struct arp_entry *get_mac_entry(uint32_t given_ip);
+
 void init(int argc, char *argv[]);
+
+struct packet *make_packet(char *buf, struct route_table_entry* best_route, size_t len, int interface);
 
 #define DIE(condition, message, ...) \
 	do { \

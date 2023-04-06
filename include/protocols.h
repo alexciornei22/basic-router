@@ -21,6 +21,9 @@ struct  ether_header {
     uint16_t ether_type;     // identificator protocol encapsulat
 };
 
+#define ETHERTYPE_IP 0x0800 /* IP */
+#define ETHERTYPE_ARP 0x0806 /* ARP */
+
 /* IP Header */
 struct iphdr {
     // this means that version uses 4 bits, and ihl 4 bits
@@ -57,3 +60,5 @@ struct icmphdr
     } frag;                        /* path mtu discovery */
   } un;
 };
+
+int send_arp_reply(struct arp_header* arp_req, int interface);

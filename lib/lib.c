@@ -1,4 +1,6 @@
 #include "lib.h"
+#include "protocols.h"
+#include "queue.h"
 
 #include <sys/ioctl.h>
 #include <net/if.h>
@@ -19,6 +21,8 @@
 
 
 int interfaces[ROUTER_NUM_INTERFACES];
+
+extern queue q;
 
 int get_sock(const char *if_name)
 {
@@ -244,4 +248,114 @@ int parse_arp_table(char *path, struct arp_entry *arp_table)
 	fclose(f);
 	fprintf(stderr, "Done parsing ARP table.\n");
 	return i;
+}
+
+int send_arp_request(struct route_table_entry* route)
+{
+    char *buf = malloc(MAX_PACKET_LEN);
+    size_t len = sizeof(struct ether_header) + sizeof(struct arp_header);
+
+    struct ether_header* eth_hdr = (struct ether_header*) buf;
+    struct arp_header* arp_hdr = (struct arp_header*) (buf + sizeof(struct ether_header));
+
+    get_interface_mac(route->interface, eth_hdr->ether_shost);
+    memset(eth_hdr->ether_dhost, 0xff, MAC_LEN);
+    eth_hdr->ether_type = htons(ETHERTYPE_ARP);
+
+    arp_hdr->htype = htons(ARP_HTYPE_ETH);
+    arp_hdr->ptype = htons(ETHERTYPE_IP);
+    arp_hdr->hlen = MAC_LEN;
+    arp_hdr->plen = IP_LEN;
+    arp_hdr->op = htons(ARP_OPCODE_REQ);
+    get_interface_mac(route->interface, arp_hdr->sha);
+    arp_hdr->spa = inet_addr(get_interface_ip(route->interface));
+    memset(arp_hdr->tha, 0x0, MAC_LEN);
+    arp_hdr->tpa = route->next_hop;
+
+    send_to_link(route->interface, buf, len);
+
+    return 0;
+}
+
+int send_arp_reply(struct arp_header* arp_req, int interface)
+{
+    char *buf = malloc(MAX_PACKET_LEN);
+    size_t len = sizeof(struct ether_header) + sizeof(struct arp_header);
+
+    struct ether_header* eth_hdr = (struct ether_header*) buf;
+    struct arp_header* arp_hdr = (struct arp_header*) (buf + sizeof(struct ether_header));
+
+    get_interface_mac(interface, eth_hdr->ether_shost);
+    memcpy(eth_hdr->ether_dhost, arp_req->sha, MAC_LEN);
+    eth_hdr->ether_type = htons(ETHERTYPE_ARP);
+
+    arp_hdr->htype = htons(ARP_HTYPE_ETH);
+    arp_hdr->ptype = htons(ETHERTYPE_IP);
+    arp_hdr->hlen = MAC_LEN;
+    arp_hdr->plen = IP_LEN;
+    arp_hdr->op = htons(ARP_OPCODE_REP);
+    get_interface_mac(interface, arp_hdr->sha);
+    arp_hdr->spa = inet_addr(get_interface_ip(interface));
+    memcpy(arp_hdr->tha, arp_req->sha, MAC_LEN);
+    arp_hdr->tpa = arp_req->spa;
+
+    send_to_link(interface, buf, len);
+
+    return 0;
+}
+
+int send_icmp_error(char *buf, size_t len, int error)
+{
+    struct iphdr* ip_hdr = (struct iphdr*) (buf + sizeof(struct ether_header));
+    char* original_data = (buf + sizeof(struct iphdr) + sizeof(struct ether_header));
+
+    char error_msg[MAX_PACKET_LEN];
+    memset(error_msg, 0, MAX_PACKET_LEN);
+
+    size_t error_len = sizeof(struct ether_header) + sizeof(struct iphdr) + sizeof(struct icmphdr) + sizeof(struct iphdr) + 4;
+
+    struct ether_header* error_eth = (struct ether_header*) error_msg;
+    struct iphdr* error_ip = (struct iphdr*) (error_msg + sizeof(struct ether_header));
+    struct icmphdr* error_icmp = (struct icmphdr*) (error_msg + sizeof(struct ether_header) + sizeof(struct iphdr));
+    char *data = (error_msg + sizeof(struct ether_header) + sizeof(struct iphdr) + 8);
+
+    error_eth->ether_type = htons(ETHERTYPE_IP);
+
+    error_ip->version = 4;
+    error_ip->ihl = 5;
+    error_ip->tos = 0;
+    error_ip->tot_len = htons(sizeof(struct iphdr) + sizeof(struct icmphdr));
+    error_ip->id = htons(1);
+    error_ip->frag_off = 0;
+    error_ip->ttl = 64;
+    error_ip->protocol = 1;
+
+    error_icmp->type = 11;
+    error_icmp->code = 0;
+    error_icmp->checksum = 0;
+    memcpy(data, ip_hdr, sizeof(struct iphdr));
+    memcpy(data + sizeof(struct iphdr), original_data, 4);
+
+    struct route_table_entry* route = get_best_route(ip_hdr->saddr);
+    error_ip->saddr = inet_addr(get_interface_ip(route->interface));
+    error_ip->daddr = ip_hdr->saddr;
+
+    error_ip->check = 0;
+    error_ip->check = htons(checksum((uint16_t*) error_ip, sizeof(struct iphdr)));
+    error_icmp->checksum = htons(checksum((uint16_t*) error_icmp, sizeof(struct icmphdr)));
+
+    get_interface_mac(route->interface, error_eth->ether_dhost);
+    struct arp_entry* arp_entry = get_mac_entry(route->next_hop);
+    if (!arp_entry) {
+        struct packet* new_pack = make_packet(error_msg, route, error_len, route->interface);
+        queue_enq(q, new_pack);
+        send_arp_request(route);
+
+        return -1;
+    }
+    memcpy(error_eth->ether_dhost, arp_entry->mac, MAC_LEN);
+
+    send_to_link(route->interface, error_msg, error_len);
+
+    return 0;
 }

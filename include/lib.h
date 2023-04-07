@@ -14,6 +14,12 @@
 #define ARP_OPCODE_REP 2
 #define ARP_HTYPE_ETH 1
 
+#define ICMP_ECHOREPLY		0	/* Echo Reply			*/
+#define ICMP_DEST_UNREACH	3	/* Destination Unreachable	*/
+#define ICMP_NET_UNREACH        0        /* Network Unreachable                */
+#define ICMP_EXC_TTL		0	/* TTL count exceeded		*/
+#define ICMP_TIME_EXCEEDED	11	/* Time Exceeded		*/
+
 #define ROUTER_NUM_INTERFACES 3
 
 int send_to_link(int interface, char *frame_data, size_t length);
@@ -102,7 +108,9 @@ int parse_arp_table(char *path, struct arp_entry *arp_table);
 
 int send_arp_request(struct route_table_entry* route);
 
-int send_icmp_error(char *buf, size_t len, int error);
+int send_icmp_error(char *buf, size_t len, int error, int code);
+
+int send_icmp_reply(uint32_t ip, char *echo_data);
 
 struct route_table_entry *get_best_route(uint32_t ip_dest);
 

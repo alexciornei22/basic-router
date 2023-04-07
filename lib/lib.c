@@ -304,7 +304,7 @@ int send_arp_reply(struct arp_header* arp_req, int interface)
     return 0;
 }
 
-int send_icmp_error(char *buf, size_t len, int error)
+int send_icmp_error(char *buf, size_t len, int error, int code)
 {
     struct iphdr* ip_hdr = (struct iphdr*) (buf + sizeof(struct ether_header));
     char* original_data = (buf + sizeof(struct iphdr) + sizeof(struct ether_header));
@@ -330,8 +330,8 @@ int send_icmp_error(char *buf, size_t len, int error)
     error_ip->ttl = 64;
     error_ip->protocol = 1;
 
-    error_icmp->type = 11;
-    error_icmp->code = 0;
+    error_icmp->type = error;
+    error_icmp->code = code;
     error_icmp->checksum = 0;
     memcpy(data, ip_hdr, sizeof(struct iphdr));
     memcpy(data + sizeof(struct iphdr), original_data, 4);
@@ -356,6 +356,58 @@ int send_icmp_error(char *buf, size_t len, int error)
     memcpy(error_eth->ether_dhost, arp_entry->mac, MAC_LEN);
 
     send_to_link(route->interface, error_msg, error_len);
+
+    return 0;
+}
+
+int send_icmp_reply(uint32_t ip, char *echo_data)
+{
+    char reply_msg[MAX_PACKET_LEN];
+    memset(reply_msg, 0, MAX_PACKET_LEN);
+
+    size_t reply_len = sizeof(struct ether_header) + sizeof(struct iphdr) + sizeof(struct icmphdr);
+
+    struct ether_header* reply_eth = (struct ether_header*) reply_msg;
+    struct iphdr* reply_ip = (struct iphdr*) (reply_msg + sizeof(struct ether_header));
+    struct icmphdr* reply_icmp = (struct icmphdr*) (reply_msg + sizeof(struct ether_header) + sizeof(struct iphdr));
+    char *reply_data = (reply_msg + sizeof(struct ether_header) + sizeof(struct iphdr) + 8);
+
+    reply_eth->ether_type = htons(ETHERTYPE_IP);
+
+    reply_ip->version = 4;
+    reply_ip->ihl = 5;
+    reply_ip->tos = 0;
+    reply_ip->tot_len = htons(sizeof(struct iphdr) + sizeof(struct icmphdr));
+    reply_ip->id = htons(1);
+    reply_ip->frag_off = 0;
+    reply_ip->ttl = 64;
+    reply_ip->protocol = 1;
+
+    reply_icmp->type = 0;
+    reply_icmp->code = ICMP_ECHOREPLY;
+    reply_icmp->checksum = 0;
+    memcpy(reply_data, echo_data, 64);
+
+    struct route_table_entry* route = get_best_route(ip);
+    reply_ip->saddr = inet_addr(get_interface_ip(route->interface));
+    reply_ip->daddr = ip;
+
+    reply_ip->check = 0;
+    reply_ip->check = htons(checksum((uint16_t*) reply_ip, sizeof(struct iphdr)));
+    reply_icmp->checksum = htons(checksum((uint16_t*) reply_icmp, sizeof(struct icmphdr)));
+
+    get_interface_mac(route->interface, reply_eth->ether_dhost);
+    struct arp_entry* arp_entry = get_mac_entry(route->next_hop);
+    if (!arp_entry) {
+        struct packet* new_pack = make_packet(reply_msg, route, reply_len, route->interface);
+        queue_enq(q, new_pack);
+        send_arp_request(route);
+
+        return -1;
+    }
+    memcpy(reply_eth->ether_dhost, arp_entry->mac, MAC_LEN);
+
+    send_to_link(route->interface, reply_msg, reply_len);
 
     return 0;
 }

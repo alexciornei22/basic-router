@@ -4,7 +4,6 @@
 #include "queue.h"
 #include "lib.h"
 #include "protocols.h"
-#include "list.h"
 
 struct route_table_entry* rtable;
 int rtable_len;
@@ -54,15 +53,23 @@ int handle_ip(char *buf, size_t len, struct ether_header* eth_hdr, int interface
     ip_hdr->ttl--;
     if (ip_hdr->ttl < 1) {
         printf("TTL exceeded\n");
-        send_icmp_error(buf, len, 0);
+        send_icmp_error(buf, len, ICMP_TIME_EXCEEDED, ICMP_EXC_TTL);
+
         return -1;
     }
     // update checksum
     ip_hdr->check = htons(checksum((uint16_t*) ip_hdr, sizeof(struct iphdr)));
 
+    if (ip_hdr->daddr == inet_addr(get_interface_ip(interface))) {
+        send_icmp_reply(ip_hdr->saddr, buf + sizeof(struct ether_header) + sizeof(struct iphdr) + 8);
+        return 0;
+    }
+
     struct route_table_entry *best_route = get_best_route(ip_hdr->daddr);
     if (!best_route) {
         printf("Route not found\n");
+        send_icmp_error(buf, len, ICMP_DEST_UNREACH, ICMP_NET_UNREACH);
+
         return -1;
     }
 

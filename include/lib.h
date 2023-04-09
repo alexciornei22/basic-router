@@ -5,9 +5,11 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <limits.h>
+#include "queue.h"
+#include "trie.h"
 
 #define MAX_PACKET_LEN 1600
+#define MAX_HOSTS 100
 
 #define MAC_LEN 6
 #define IP_LEN 4
@@ -51,16 +53,18 @@ struct arp_entry {
     uint8_t mac[6];
 };
 
-struct packet {
-    char *buf;
-    struct route_table_entry* best_route;
-    size_t len;
+/* ARP table */
+struct arp_table {
+    struct arp_entry* arp_entries; /* ARP entries */
+    size_t len; /* size of ARP table */
+    queue q; /* queue of packets which wait ARP response */
 };
 
-struct trie_node {
-    struct trie_node* left;
-    struct trie_node* right;
-    struct route_table_entry* route;
+/* packet info for use in ARP queue storage */
+struct packet {
+    char *buf; /* packet buffer */
+    struct route_table_entry* best_route; /* best route where packet needs to be sent */
+    size_t len; /* packet length */
 };
 
 char *get_interface_ip(int interface);
@@ -75,13 +79,6 @@ char *get_interface_ip(int interface);
 void get_interface_mac(int interface, uint8_t *mac);
 
 /**
- * @brief Homework infrastructure function.
- *
- * @param argc
- * @param argv
- */
-
-/**
  * @brief IPv4 checksum per  RFC 791. To compute the checksum
  * of an IP header we must set the checksum to 0 beforehand.
  *
@@ -94,41 +91,52 @@ void get_interface_mac(int interface, uint8_t *mac);
 uint16_t checksum(uint16_t *data, size_t len);
 
 /**
- * hwaddr_aton - Convert ASCII string to MAC address (colon-delimited format)
- * @txt: MAC address as a string (e.g., "00:11:22:33:44:55")
- * @addr: Buffer for the MAC address (ETH_ALEN = 6 bytes)
- * Returns: 0 on success, -1 on failure (e.g., string not a MAC address)
+ * @brief Populates route trie from file
+ * @param path route table file path
+ * @param route_trie root of route trie
  */
-int hwaddr_aton(const char *txt, uint8_t *addr);
+void read_rtable(const char *path, struct trie_node *route_trie);
 
-/* Populates a route table from file, rtable should be allocated
- * e.g. rtable = malloc(sizeof(struct route_table_entry) * 80000);
- * This function returns the size of the route table.
+/**
+ * @param route route to send ARP request for
  */
-int read_rtable(const char *path, struct trie_node *route_trie);
+void send_arp_request(struct route_table_entry* route);
 
-/* Parses a static mac table from path and populates arp_table.
- * arp_table should be allocated and have enough space. This
- * function returns the size of the arp table.
- * */
-int parse_arp_table(char *path, struct arp_entry *arp_table);
+/**
+ * Sends out ICMP error
+ * @param buf original packet buffer
+ * @param len original packet length
+ * @param error ICMP error
+ * @param code ICMP code
+ * @param route_trie route trie
+ * @param arp_table ARP table
+ */
+void send_icmp_error(char *buf, size_t len, int error, int code, struct trie_node *route_trie, struct arp_table *arp_table);
 
-int send_arp_request(struct route_table_entry* route);
+/**
+ * Sends ICMP reply to given IP address
+ * @param ip target IP address
+ * @param original_buf original packet buffer
+ * @param len original packet length
+ * @param route_trie route trie
+ * @param arp_table ARP table
+ */
+void send_icmp_reply(uint32_t ip, char *original_buf, size_t len, struct trie_node *route_trie, struct arp_table *arp_table);
 
-int send_icmp_error(char *buf, size_t len, int error, int code, struct trie_node *route_trie);
-
-int send_icmp_reply(uint32_t ip, char *original_buf, size_t len, struct trie_node *route_trie);
-
-struct arp_entry *get_mac_entry(uint32_t given_ip);
-
-struct trie_node* create_node();
-
-void insert_in_trie(struct route_table_entry *route, struct trie_node *route_trie);
-
-struct route_table_entry *lpm(uint32_t ip_dest, struct trie_node *route_trie);
+/**
+ * Searches for an IP in cached MAC address table
+ * @param given_ip IP address to search
+ * @param arp_table ARP table with MAC addresses
+ * @return ARP table entry for given IP or NULL if
+ * MAC address is not found
+ */
+struct arp_entry *get_mac_entry(uint32_t given_ip, struct arp_table *arp_table);
 
 void init(int argc, char *argv[]);
 
+/**
+ * initialises a packet to be added in the ARP queue
+ */
 struct packet *make_packet(char *buf, struct route_table_entry* best_route, size_t len);
 
 #define DIE(condition, message, ...) \

@@ -5,8 +5,10 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <limits.h>
 
 #define MAX_PACKET_LEN 1600
+
 #define MAC_LEN 6
 #define IP_LEN 4
 
@@ -16,7 +18,7 @@
 
 #define ICMP_ECHOREPLY		0	/* Echo Reply			*/
 #define ICMP_DEST_UNREACH	3	/* Destination Unreachable	*/
-#define ICMP_NET_UNREACH        0        /* Network Unreachable                */
+#define ICMP_NET_UNREACH    0        /* Network Unreachable                */
 #define ICMP_EXC_TTL		0	/* TTL count exceeded		*/
 #define ICMP_TIME_EXCEEDED	11	/* Time Exceeded		*/
 
@@ -53,7 +55,12 @@ struct packet {
     char *buf;
     struct route_table_entry* best_route;
     size_t len;
-    int interface;
+};
+
+struct trie_node {
+    struct trie_node* left;
+    struct trie_node* right;
+    struct route_table_entry* route;
 };
 
 char *get_interface_ip(int interface);
@@ -98,7 +105,7 @@ int hwaddr_aton(const char *txt, uint8_t *addr);
  * e.g. rtable = malloc(sizeof(struct route_table_entry) * 80000);
  * This function returns the size of the route table.
  */
-int read_rtable(const char *path, struct route_table_entry *rtable);
+int read_rtable(const char *path, struct trie_node *route_trie);
 
 /* Parses a static mac table from path and populates arp_table.
  * arp_table should be allocated and have enough space. This
@@ -108,17 +115,21 @@ int parse_arp_table(char *path, struct arp_entry *arp_table);
 
 int send_arp_request(struct route_table_entry* route);
 
-int send_icmp_error(char *buf, size_t len, int error, int code);
+int send_icmp_error(char *buf, size_t len, int error, int code, struct trie_node *route_trie);
 
-int send_icmp_reply(uint32_t ip, char *echo_data);
-
-struct route_table_entry *get_best_route(uint32_t ip_dest);
+int send_icmp_reply(uint32_t ip, char *original_buf, size_t len, struct trie_node *route_trie);
 
 struct arp_entry *get_mac_entry(uint32_t given_ip);
 
+struct trie_node* create_node();
+
+void insert_in_trie(struct route_table_entry *route, struct trie_node *route_trie);
+
+struct route_table_entry *lpm(uint32_t ip_dest, struct trie_node *route_trie);
+
 void init(int argc, char *argv[]);
 
-struct packet *make_packet(char *buf, struct route_table_entry* best_route, size_t len, int interface);
+struct packet *make_packet(char *buf, struct route_table_entry* best_route, size_t len);
 
 #define DIE(condition, message, ...) \
 	do { \

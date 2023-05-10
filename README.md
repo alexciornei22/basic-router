@@ -1,8 +1,4 @@
-## CIORNEI ALEXANDRU-ȘTEFAN, 324CD
-
----
-
-# Cerințe rezolvate:
+## CIORNEI ALEXANDRU-ȘTEFAN
 
 ### 1. Procesul de dirijare
 La început se alocă memorie și se inițializează structurile
